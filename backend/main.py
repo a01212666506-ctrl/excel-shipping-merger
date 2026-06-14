@@ -8,7 +8,7 @@ from services.excel_handler import ExcelHandler
 from services.merger import Merger
 from services.validator import Validator
 
-app = FastAPI(title="Excel Shipping Merger API", version="1.0.0")
+app = FastAPI(title="Excel Shipping Merger API", version="2.0.0")
 
 # CORS Middleware
 app.add_middleware(
@@ -29,7 +29,7 @@ excel_handler = ExcelHandler()
 merger = Merger()
 validator = Validator()
 
-# Session storage (in-memory)
+# Session storage
 sessions = {}
 
 @app.get("/api/health")
@@ -38,7 +38,7 @@ async def health():
     return {
         "status": "ok",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
+        "version": "2.0.0"
     }
 
 @app.post("/api/upload")
@@ -48,13 +48,10 @@ async def upload_files(
 ):
     """
     Upload customer and system Excel files
-    Returns column mappings and data preview
     """
     try:
-        # Generate session ID
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         
-        # Save uploaded files
         customer_path = f"uploads/{session_id}_customer.xlsx"
         system_path = f"uploads/{session_id}_system.xlsx"
         
@@ -64,17 +61,14 @@ async def upload_files(
         with open(system_path, "wb") as f:
             f.write(await system_file.read())
         
-        # Parse Excel files
         customer_data = excel_handler.read_excel(customer_path)
         system_data = excel_handler.read_excel(system_path)
         
-        # Get auto mappings
         mappings = excel_handler.get_auto_mappings(
             customer_data["columns"],
             system_data["columns"]
         )
         
-        # Store session
         sessions[session_id] = {
             "customer_path": customer_path,
             "system_path": system_path,
@@ -100,8 +94,7 @@ async def upload_files(
 @app.post("/api/merge")
 async def merge_files(payload: dict):
     """
-    Merge files based on provided mappings
-    Returns validation report and merged data preview
+    Merge files based on mappings
     """
     try:
         session_id = payload.get("session_id")
@@ -115,7 +108,6 @@ async def merge_files(payload: dict):
         customer_data = session["customer_data"]
         system_data = session["system_data"]
         
-        # Merge data
         merged_result = merger.merge_data(
             customer_data,
             system_data,
@@ -123,13 +115,11 @@ async def merge_files(payload: dict):
             fixed_values
         )
         
-        # Validate
         validation_report = validator.validate(
             merged_result["data"],
             system_data["columns"]
         )
         
-        # Store merged data in session
         session["merged_data"] = merged_result["data"]
         session["validation_report"] = validation_report
         session["mapping"] = mapping
@@ -140,7 +130,6 @@ async def merge_files(payload: dict):
             "session_id": session_id,
             "total_rows": len(merged_result["data"]),
             "new_rows": validation_report["stats"]["new_rows"],
-            "updated_rows": validation_report["stats"]["updated_rows"],
             "error_rows": validation_report["stats"]["error_rows"],
             "warning_rows": validation_report["stats"].get("warning_rows", 0),
             "validation_report": validation_report,
@@ -164,7 +153,6 @@ async def download_excel(session_id: str):
         if "merged_data" not in session:
             raise HTTPException(status_code=400, detail="No merged data available")
         
-        # Generate output file
         output_path = f"output/{session_id}_merged.xlsx"
         excel_handler.write_excel(
             output_path,
@@ -184,7 +172,7 @@ async def download_excel(session_id: str):
 @app.post("/api/save-template")
 async def save_template(payload: dict):
     """
-    Save mapping template for reuse
+    Save mapping template
     """
     try:
         template_name = payload.get("template_name")
@@ -217,7 +205,7 @@ async def save_template(payload: dict):
 @app.get("/api/templates")
 async def get_templates():
     """
-    Get all saved mapping templates
+    Get all saved templates
     """
     try:
         templates = []
@@ -231,28 +219,6 @@ async def get_templates():
             "status": "success",
             "templates": templates
         }
-    
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/api/cleanup/{session_id}")
-async def cleanup_session(session_id: str):
-    """
-    Clean up session files
-    """
-    try:
-        if session_id in sessions:
-            session = sessions[session_id]
-            
-            # Delete uploaded files
-            for key in ["customer_path", "system_path"]:
-                if key in session and os.path.exists(session[key]):
-                    os.remove(session[key])
-            
-            # Delete session
-            del sessions[session_id]
-        
-        return {"status": "cleaned"}
     
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
